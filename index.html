@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>姿勢改善タイマー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #f0faf4; }
+  .progress-ring__circle {
+    transition: stroke-dashoffset 1s linear;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+  }
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.4); }
+    50% { box-shadow: 0 0 0 16px rgba(52,211,153,0); }
+  }
+  .pulse-active { animation: pulse-glow 2s infinite; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn 0.4s ease; }
+</style>
+</head>
+<body class="min-h-screen text-slate-700">
+<div class="max-w-md mx-auto p-4">
+  <!-- Header -->
+  <div class="text-center mb-6 pt-4">
+    <h1 class="text-3xl font-bold text-emerald-700 mb-1">🧘 姿勢改善タイマー</h1>
+    <p class="text-slate-500 text-sm">作業インターバルと休憩を管理し、姿勢をリセット</p>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settingsPanel" class="bg-white rounded-2xl shadow-md p-5 mb-4 border border-emerald-100">
+    <h2 class="font-bold text-emerald-700 mb-4">⚙️ 設定</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-600 mb-1">作業時間: <span id="workLabel">25</span>分</label>
+        <input type="range" id="workSlider" min="25" max="60" value="25"
+          class="w-full accent-emerald-500"
+          aria-label="作業時間を分単位で設定"
+          oninput="document.getElementById('workLabel').textContent=this.value; resetTimer()">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-600 mb-1">休憩時間: <span id="breakLabel">5</span>分</label>
+        <input type="range" id="breakSlider" min="1" max="10" value="5"
+          class="w-full accent-teal-500"
+          aria-label="休憩時間を分単位で設定"
+          oninput="document.getElementById('breakLabel').textContent=this.value; resetTimer()">
+      </div>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div id="timerPanel" class="bg-white rounded-2xl shadow-md p-6 mb-4 border border-emerald-100 text-center">
+    <!-- Phase label -->
+    <div id="phaseLabel" class="text-sm font-bold uppercase tracking-widest text-emerald-500 mb-3">作業中</div>
+
+    <!-- SVG Progress Ring -->
+    <div class="flex justify-center mb-4">
+      <div class="relative" style="width:180px;height:180px;">
+        <svg width="180" height="180">
+          <circle cx="90" cy="90" r="80" fill="none" stroke="#d1fae5" stroke-width="10"/>
+          <circle id="progressCircle" class="progress-ring__circle" cx="90" cy="90" r="80"
+            fill="none" stroke="#10b981" stroke-width="10"
+            stroke-dasharray="502.65" stroke-dashoffset="0"/>
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+          <div id="timerDisplay" class="text-4xl font-bold text-slate-700 tabular-nums">25:00</div>
+          <div id="phaseIcon" class="text-2xl mt-1">💻</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex gap-3 justify-center">
+      <button id="startBtn" onclick="toggleTimer()"
+        class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-6 rounded-xl transition-colors"
+        aria-label="タイマーを開始または一時停止">▶ 開始</button>
+      <button onclick="resetTimer()"
+        class="bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold py-2 px-6 rounded-xl transition-colors"
+        aria-label="タイマーをリセット">↺ リセット</button>
+    </div>
+  </div>
+
+  <!-- Break Exercise (hidden during work) -->
+  <div id="breakPanel" class="hidden bg-emerald-50 rounded-2xl shadow-md p-5 mb-4 border border-emerald-200 fade-in">
+    <h2 class="font-bold text-emerald-700 mb-3">🌿 今日の姿勢エクササイズ</h2>
+    <div id="exerciseCard" class="bg-white rounded-xl p-4 border border-emerald-100 text-center">
+      <div id="exerciseIcon" class="text-4xl mb-2">🔄</div>
+      <div id="exerciseName" class="text-xl font-bold text-emerald-700"></div>
+      <div id="exerciseDesc" class="text-sm text-slate-500 mt-1"></div>
+    </div>
+    <div class="flex justify-center gap-2 mt-3">
+      <button onclick="prevExercise()"
+        class="bg-white border border-emerald-200 hover:bg-emerald-50 text-slate-600 rounded-lg px-4 py-2 text-sm"
+        aria-label="前のエクササイズへ">◀ 前へ</button>
+      <button onclick="nextExercise()"
+        class="bg-white border border-emerald-200 hover:bg-emerald-50 text-slate-600 rounded-lg px-4 py-2 text-sm"
+        aria-label="次のエクササイズへ">次へ ▶</button>
+    </div>
+  </div>
+
+  <!-- Session History -->
+  <div class="bg-white rounded-2xl shadow-md p-5 border border-emerald-100">
+    <h2 class="font-bold text-emerald-700 mb-3">📅 本日の記録</h2>
+    <div class="grid grid-cols-3 gap-3 mb-3">
+      <div class="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
+        <div id="cyclesCount" class="text-2xl font-bold text-emerald-600">0</div>
+        <div class="text-xs text-slate-500">完了サイクル</div>
+      </div>
+      <div class="bg-teal-50 rounded-xl p-3 text-center border border-teal-100">
+        <div id="workMinutes" class="text-2xl font-bold text-teal-600">0</div>
+        <div class="text-xs text-slate-500">作業分数</div>
+      </div>
+      <div class="bg-sage-50 rounded-xl p-3 text-center border border-slate-100" style="background:#f8fdf9">
+        <div id="breakMinutes" class="text-2xl font-bold text-slate-500">0</div>
+        <div class="text-xs text-slate-500">休憩分数</div>
+      </div>
+    </div>
+    <div id="historyList" class="space-y-1 max-h-32 overflow-y-auto text-sm text-slate-500"></div>
+    <button onclick="clearHistory()"
+      class="mt-3 text-xs text-red-400 hover:text-red-500 underline"
+      aria-label="履歴をクリア">履歴をクリア</button>
+  </div>
+</div>
+
+<script>
+const exercises = [
+  { icon: '🦒', name: '首のストレッチ', desc: '首をゆっくり左右に倒す。各方向20秒キープ。' },
+  { icon: '🦋', name: '肩甲骨ほぐし', desc: '両肩を後ろに大きく回す。10回×2セット。' },
+  { icon: '🌻', name: '胸を開く背伸び', desc: '両手を組んで頭上に伸ばし、胸を張る。30秒キープ。' },
+  { icon: '👁️', name: '目のホットパーム', desc: '手のひらを温めて目を覆い、目を休める。1分間。' },
+  { icon: '⭕', name: '足首回し', desc: '片足ずつ足首を大きく10回ずつ回す。血行促進。' },
+];
+
+let exerciseIdx = 0;
+let timerInterval = null;
+let isRunning = false;
+let isBreak = false;
+let remainingSeconds = 0;
+let totalSeconds = 0;
+
+// Load today's history from localStorage
+const todayKey = 'posture-' + new Date().toISOString().slice(0,10);
+let history = JSON.parse(localStorage.getItem(todayKey) || '[]');
+
+const CIRCUMFERENCE = 2 * Math.PI * 80; // ~502.65
+
+function getWorkSecs() { return parseInt(document.getElementById('workSlider').value) * 60; }
+function getBreakSecs() { return parseInt(document.getElementById('breakSlider').value) * 60; }
+
+function initTimer() {
+  totalSeconds = isBreak ? getBreakSecs() : getWorkSecs();
+  remainingSeconds = totalSeconds;
+  updateDisplay();
+}
+
+function toggleTimer() {
+  if (isRunning) {
+    clearInterval(timerInterval);
+    isRunning = false;
+    document.getElementById('startBtn').textContent = '▶ 再開';
+  } else {
+    isRunning = true;
+    document.getElementById('startBtn').textContent = '⏸ 一時停止';
+    timerInterval = setInterval(tick, 1000);
+  }
+}
+
+function tick() {
+  remainingSeconds--;
+  updateDisplay();
+  if (remainingSeconds <= 0) {
+    clearInterval(timerInterval);
+    isRunning = false;
+    onPhaseComplete();
+  }
+}
+
+function onPhaseComplete() {
+  if (!isBreak) {
+    // Work phase done → log it
+    const workMins = parseInt(document.getElementById('workSlider').value);
+    history.push({ type: 'work', mins: workMins, time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'}) });
+    saveHistory();
+    renderHistory();
+    // Switch to break
+    isBreak = true;
+    showBreakPanel();
+    playNotification('🔔 作業完了！休憩時間です。');
+  } else {
+    // Break done → log it
+    const breakMins = parseInt(document.getElementById('breakSlider').value);
+    history.push({ type: 'break', mins: breakMins, time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'}) });
+    saveHistory();
+    renderHistory();
+    isBreak = false;
+    hideBreakPanel();
+    playNotification('💪 休憩終了！作業を再開しましょう。');
+  }
+  initTimer();
+  // Auto-start next phase
+  isRunning = true;
+  document.getElementById('startBtn').textContent = '⏸ 一時停止';
+  timerInterval = setInterval(tick, 1000);
+}
+
+function resetTimer() {
+  clearInterval(timerInterval);
+  isRunning = false;
+  isBreak = false;
+  hideBreakPanel();
+  document.getElementById('startBtn').textContent = '▶ 開始';
+  initTimer();
+}
+
+function updateDisplay() {
+  const mins = Math.floor(remainingSeconds / 60);
+  const secs = remainingSeconds % 60;
+  document.getElementById('timerDisplay').textContent =
+    String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
+
+  const progress = totalSeconds > 0 ? (totalSeconds - remainingSeconds) / totalSeconds : 0;
+  const offset = CIRCUMFERENCE * (1 - progress);
+  const circle = document.getElementById('progressCircle');
+  circle.style.strokeDashoffset = offset;
+  circle.setAttribute('stroke', isBreak ? '#0d9488' : '#10b981');
+
+  document.getElementById('phaseLabel').textContent = isBreak ? '休憩中' : '作業中';
+  document.getElementById('phaseLabel').className = 'text-sm font-bold uppercase tracking-widest mb-3 ' +
+    (isBreak ? 'text-teal-500' : 'text-emerald-500');
+  document.getElementById('phaseIcon').textContent = isBreak ? '🧘' : '💻';
+}
+
+function showBreakPanel() {
+  document.getElementById('breakPanel').classList.remove('hidden');
+  renderExercise();
+}
+function hideBreakPanel() {
+  document.getElementById('breakPanel').classList.add('hidden');
+}
+
+function renderExercise() {
+  const ex = exercises[exerciseIdx];
+  document.getElementById('exerciseIcon').textContent = ex.icon;
+  document.getElementById('exerciseName').textContent = ex.name;
+  document.getElementById('exerciseDesc').textContent = ex.desc;
+}
+function nextExercise() { exerciseIdx = (exerciseIdx+1) % exercises.length; renderExercise(); }
+function prevExercise() { exerciseIdx = (exerciseIdx-1+exercises.length) % exercises.length; renderExercise(); }
+
+function saveHistory() {
+  localStorage.setItem(todayKey, JSON.stringify(history));
+}
+
+function renderHistory() {
+  const workEntries = history.filter(h => h.type === 'work');
+  const breakEntries = history.filter(h => h.type === 'break');
+  const totalWork = workEntries.reduce((a,h) => a+h.mins, 0);
+  const totalBreak = breakEntries.reduce((a,h) => a+h.mins, 0);
+  const cycles = Math.min(workEntries.length, breakEntries.length);
+
+  document.getElementById('cyclesCount').textContent = cycles;
+  document.getElementById('workMinutes').textContent = totalWork;
+  document.getElementById('breakMinutes').textContent = totalBreak;
+
+  const list = document.getElementById('historyList');
+  list.innerHTML = history.slice().reverse().map(h => `
+    <div class="flex items-center gap-2 text-xs py-1 border-b border-slate-100">
+      <span class="text-slate-400">${h.time}</span>
+      <span class="${h.type === 'work' ? 'text-emerald-500' : 'text-teal-500'}">${h.type === 'work' ? '💻 作業' : '🧘 休憩'}</span>
+      <span class="text-slate-400">${h.mins}分</span>
+    </div>
+  `).join('');
+}
+
+function clearHistory() {
+  if (confirm('本日の記録を削除しますか？')) {
+    history = [];
+    saveHistory();
+    renderHistory();
+  }
+}
+
+function playNotification(msg) {
+  // Visual notification only (no external API)
+  const notif = document.createElement('div');
+  notif.className = 'fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-full shadow-lg text-sm font-bold z-50 fade-in';
+  notif.textContent = msg;
+  document.body.appendChild(notif);
+  setTimeout(() => notif.remove(), 3000);
+}
+
+// Init
+initTimer();
+renderHistory();
+</script>
+</body>
+</html>
